@@ -69,6 +69,11 @@ export default defineConfig((ctx) => {
         App: exports.worker({ cache: { enabled: true } }),
         RateLimiter: exports.durableObject({ storage: "sqlite" }),
         PostPublisher: exports.durableObject({ storage: "sqlite" }),
+        // v1.x declared this class through the wrangler `migrations` field and
+        // v3 no longer ships it. The namespace still exists on accounts that
+        // deployed v1.x, so it needs a `deleted` tombstone or the deploy is
+        // rejected with `orphaned_provisioned_namespace`.
+        PasswordHasher: exports.durableObject({ state: "deleted" }),
       },
     },
   };

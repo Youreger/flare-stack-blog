@@ -1,0 +1,123 @@
+name: deploy to cloudflare workers
+
+# v3 note: the Worker is configured by cloudflare.config.ts (read by the `cf`
+# CLI), not wrangler.jsonc. `bun run build` produces the prebuilt output under
+# .cloudflare/output and `bun run deploy` applies D1 migrations, then deploys.
+#
+# Two things changed versus the v1.x workflow:
+#   1. `bun run wrangler:prepare` is gone. It used to write resource ids into
+#      wrangler.jsonc, which v3 no longer reads. It is now a no-op that only
+#      prints a deprecation notice, so the step was removed.
+#   2. WORKER_NAME and QUEUE_NAME must be exported. cloudflare.config.ts reads
+#      them from the real environment and falls back to placeholders
+#      ("worker-name-placeholder"), which would deploy a brand new Worker
+#      instead of updating this one.
+#
+# Runtime secrets are no longer uploaded by this workflow: the old
+# `wrangler secret bulk` step needed wrangler.jsonc, and `cf deploy` preserves
+# existing secrets. Manage them in the Cloudflare dashboard under
+# Worker -> Settings -> Runtime variables and secrets.
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - ".agent/**"
+      - ".vscode/**"
+      - ".gitignore"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Cache dependencies
+        uses: actions/cache@v6
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('**/bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun ci
+
+      # === Original repo: fetch secrets from Vault ===
+      - name: "[Vault] Import cloudflare secrets"
+        if: github.repository == 'du2333/flare-stack-blog'
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://vault.dukda.com
+          token: ${{ secrets.VAULT_TOKEN }}
+          secrets: |
+            secrets/data/cloudflare *
+
+      - name: "[Vault] Import runtime secrets"
+        if: github.repository == 'du2333/flare-stack-blog'
+        uses: hashicorp/vault-action@v4
+        with:
+          url: https://vault.dukda.com
+          token: ${{ secrets.VAULT_TOKEN }}
+          secrets: |
+            secrets/data/blog *
+
+      # === Fork repos: use repository secrets ===
+      - name: "[Fork] Import secrets from repository"
+        if: github.repository != 'du2333/flare-stack-blog'
+        run: |
+          echo "CLOUDFLARE_API_TOKEN=${{ secrets.CLOUDFLARE_API_TOKEN }}" >> $GITHUB_ENV
+          echo "CLOUDFLARE_ACCOUNT_ID=${{ secrets.CLOUDFLARE_ACCOUNT_ID }}" >> $GITHUB_ENV
+          echo "WORKER_NAME=${{ vars.WORKER_NAME || 'my-blog' }}" >> $GITHUB_ENV
+          echo "QUEUE_NAME=${{ vars.QUEUE_NAME || 'blog-queue' }}" >> $GITHUB_ENV
+          echo "D1_DATABASE_ID=${{ secrets.D1_DATABASE_ID }}" >> $GITHUB_ENV
+          echo "KV_NAMESPACE_ID=${{ secrets.KV_NAMESPACE_ID }}" >> $GITHUB_ENV
+          echo "BUCKET_NAME=${{ secrets.BUCKET_NAME }}" >> $GITHUB_ENV
+          echo "DOMAIN=${{ secrets.DOMAIN }}" >> $GITHUB_ENV
+          echo "BETTER_AUTH_SECRET=${{ secrets.BETTER_AUTH_SECRET }}" >> $GITHUB_ENV
+          echo "BETTER_AUTH_URL=${{ secrets.BETTER_AUTH_URL }}" >> $GITHUB_ENV
+          echo "GITHUB_CLIENT_ID=${{ secrets.GH_CLIENT_ID }}" >> $GITHUB_ENV
+          echo "GITHUB_CLIENT_SECRET=${{ secrets.GH_CLIENT_SECRET }}" >> $GITHUB_ENV
+          echo "GITHUB_TOKEN=${{ secrets.GH_TOKEN }}" >> $GITHUB_ENV
+          echo "UMAMI_SRC=${{ secrets.UMAMI_SRC }}" >> $GITHUB_ENV
+          echo "VITE_UMAMI_WEBSITE_ID=${{ vars.VITE_UMAMI_WEBSITE_ID }}" >> $GITHUB_ENV
+          echo "VITE_TURNSTILE_SITE_KEY=${{ vars.VITE_TURNSTILE_SITE_KEY }}" >> $GITHUB_ENV
+          echo "TURNSTILE_SECRET_KEY=${{ secrets.TURNSTILE_SECRET_KEY }}" >> $GITHUB_ENV
+          echo "ROUTE=${{ vars.ROUTE }}" >> $GITHUB_ENV
+          echo "ZONE_NAME=${{ vars.ZONE_NAME }}" >> $GITHUB_ENV
+
+      - name: Build
+        run: bun run build
+
+      - name: Deploy to Cloudflare Workers
+        run: bun run deploy
+
+      - name: Purge Cloudflare CDN Cache
+        env:
+          PURGE_DOMAIN: ${{ secrets.CDN_DOMAIN || secrets.DOMAIN }}
+        run: |
+          echo "Purging CDN cache for $PURGE_DOMAIN"
+          curl -s -X POST "https://api.cloudflare.com/client/v4/zones/${{ secrets.CLOUDFLARE_ZONE_ID }}/purge_cache" \
+            -H "Authorization: Bearer ${{ secrets.CLOUDFLARE_PURGE_API_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            --data '{"prefixes":["'$PURGE_DOMAIN'"]}'
+          echo ""

@@ -80,6 +80,10 @@ _Avoid_: Alert, message
 A signed-in person who can interact with the blog through comments, profile, and submissions.
 _Avoid_: Account
 
+**Sign-in Code**:
+A short-lived one-time code emailed to an address so its owner can sign in as the **User** with that email.
+_Avoid_: OTP, verification code, magic link, password
+
 **Muted User**:
 A **User** an **Admin** has stopped from creating **Comments**. They remain a **User**: they can sign in, edit their profile, submit **Friend Links**, and delete their own **Comments**. Muting applies to every **Post** and lasts until an **Admin** unmutes them.
 _Avoid_: Banned user, blocked user, silenced user, banned
@@ -91,6 +95,10 @@ _Avoid_: Owner
 **API Key**:
 A secret an **Admin** issues so a caller can authenticate as that **Admin** on the HTTP API without a browser session. It carries that Admin's content-management permissions, but it cannot create or revoke **API Keys**.
 _Avoid_: Token, bearer, service account, machine user, OAuth client
+
+**Agent Skill**:
+The instructions and scripts an AI agent installs so it can operate a Flare Stack Blog as an **Admin** over the HTTP API with an **API Key**. It is not part of the deployed CMS.
+_Avoid_: MCP, plugin, integration, 插件, 技能包
 
 **Search Index**:
 The public search read model built from **Published Posts**.
@@ -179,7 +187,12 @@ _Avoid_: New commit, fork update
 - An **Admin** can have zero or more **API Keys**.
 - An **API Key** authenticates as its owning **Admin** and has that Admin's content-management permissions.
 - An **API Key** cannot create or revoke **API Keys**. Only a signed-in **Admin** in the admin UI can.
+- An **Agent Skill** authenticates with an **API Key**.
+- Each **Application Release** publishes the **Agent Skill** that matches it. The admin UI offers the one matching the **Running Application Release**.
 - A **User** can create **Comments** and submit **Friend Links**.
+- A **User** signs in with GitHub or with a **Sign-in Code**. There are no passwords.
+- A **Sign-in Code** for an email that has no **User** creates one; the person chooses that **User**'s public name before the sign-in completes.
+- A **Sign-in Code** is offered only when email delivery is configured in **System Config**.
 - The **Search Index** includes **Published Posts** and excludes **Draft Posts**.
 - Publishing a **Post** updates the **Search Index** from its **Public Content Snapshot** and current Category/Tag assignments. Unpublishing removes that **Post** from the **Search Index**. Category/Tag changes may remain stale in search until republishing or rebuilding the index.
 - Publishing, deleting, or retagging a **Published Post** can update the **Public Cache**.
